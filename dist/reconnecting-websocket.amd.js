@@ -1,5 +1,6 @@
 define("index", ["require", "exports"], function (require, exports) {
     "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
     ;
     ;
     ;
@@ -49,116 +50,125 @@ define("index", ["require", "exports"], function (require, exports) {
             });
         }
     };
-    var ReconnectingWebsocket = function (url, protocols, options) {
-        var _this = this;
-        if (options === void 0) { options = {}; }
-        var ws;
-        var connectingTimeout;
-        var reconnectDelay = 0;
-        var retriesCount = 0;
-        var shouldRetry = true;
-        var savedOnClose = null;
-        var listeners = {};
-        // require new to construct
-        if (!(this instanceof ReconnectingWebsocket)) {
-            throw new TypeError("Failed to construct 'ReconnectingWebSocket': Please use the 'new' operator");
-        }
-        // Set config. Not using `Object.assign` because of IE11
-        var config = getDefaultOptions();
-        Object.keys(config)
-            .filter(function (key) { return options.hasOwnProperty(key); })
-            .forEach(function (key) { return config[key] = options[key]; });
-        if (!isWebSocket(config.constructor)) {
-            throw new TypeError('Invalid WebSocket constructor. Set `options.constructor`');
-        }
-        var log = config.debug ? function () {
-            var params = [];
-            for (var _i = 0; _i < arguments.length; _i++) {
-                params[_i] = arguments[_i];
+    var ReconnectingWebSocket = (function () {
+        function ReconnectingWebSocket(url, protocols, options) {
+            if (options === void 0) { options = {}; }
+            this.listeners = {};
+            this.reconnectDelay = 0;
+            this.retriesCount = 0;
+            this.shouldRetry = true;
+            this.savedOnClose = null;
+            this.url = url;
+            this.protocols = protocols;
+            var defaultOptions = getDefaultOptions();
+            this.config = Object.keys(defaultOptions)
+                .reduce(function (mergedConfig, key) {
+                if (options.hasOwnProperty(key))
+                    return options[key];
+                else
+                    return defaultOptions[key];
+            }, {});
+            if (!isWebSocket(this.config.constructor)) {
+                throw new TypeError('Invalid WebSocket constructor. Set `options.constructor`');
             }
-            return console.log.apply(console, ['RWS:'].concat(params));
-        } : function () { };
+            this.log = this.config.debug ? function () {
+                var params = [];
+                for (var _i = 0; _i < arguments.length; _i++) {
+                    params[_i] = arguments[_i];
+                }
+                return console.log.apply(console, ['RWS:'].concat(params));
+            } : function () { };
+            this.log('init');
+            this.connect();
+        }
+        ReconnectingWebSocket.prototype.emitError = function (code, msg) {
+            var _this = this;
+            setTimeout(function () {
+                var err = new Error(msg);
+                err.code = code;
+                if (Array.isArray(_this.listeners.error)) {
+                    _this.listeners.error.forEach(function (_a) {
+                        var fn = _a[0];
+                        return fn(err);
+                    });
+                }
+                if (_this.ws.onerror) {
+                    _this.ws.onerror(err);
+                }
+            }, 0);
+        };
         /**
          * Not using dispatchEvent, otherwise we must use a DOM Event object
          * Deferred because we want to handle the close event before this
          */
-        var emitError = function (code, msg) { return setTimeout(function () {
-            var err = new Error(msg);
-            err.code = code;
-            if (Array.isArray(listeners.error)) {
-                listeners.error.forEach(function (_a) {
-                    var fn = _a[0];
-                    return fn(err);
-                });
-            }
-            if (ws.onerror) {
-                ws.onerror(err);
-            }
-        }, 0); };
-        var handleClose = function () {
-            log('handleClose', { shouldRetry: shouldRetry });
-            retriesCount++;
-            log('retries count:', retriesCount);
-            if (retriesCount > config.maxRetries) {
-                emitError('EHOSTDOWN', 'Too many failed connection attempts');
+        ReconnectingWebSocket.prototype.handleClose = function () {
+            var _this = this;
+            var shouldRetry = this.shouldRetry;
+            this.log('handleClose', { shouldRetry: shouldRetry });
+            this.retriesCount++;
+            this.log('retries count:', this.retriesCount);
+            if (this.retriesCount > this.config.maxRetries) {
+                this.emitError('EHOSTDOWN', 'Too many failed connection attempts');
                 return;
             }
-            if (!reconnectDelay) {
-                reconnectDelay = initReconnectionDelay(config);
+            if (!this.reconnectDelay) {
+                this.reconnectDelay = initReconnectionDelay(this.config);
             }
             else {
-                reconnectDelay = updateReconnectionDelay(config, reconnectDelay);
+                this.reconnectDelay = updateReconnectionDelay(this.config, this.reconnectDelay);
             }
-            log('handleClose - reconnectDelay:', reconnectDelay);
+            this.log('handleClose - reconnectDelay:', this.reconnectDelay);
             if (shouldRetry) {
-                setTimeout(connect, reconnectDelay);
+                setTimeout(function () { return _this.connect; }, this.reconnectDelay);
             }
         };
-        var connect = function () {
-            if (!shouldRetry) {
+        ReconnectingWebSocket.prototype.connect = function () {
+            var _this = this;
+            if (!this.shouldRetry) {
                 return;
             }
-            log('connect');
-            var oldWs = ws;
-            var wsUrl = (typeof url === 'function') ? url() : url;
-            ws = new config.constructor(wsUrl, protocols);
-            connectingTimeout = setTimeout(function () {
-                log('timeout');
-                ws.close();
-                emitError('ETIMEDOUT', 'Connection timeout');
-            }, config.connectionTimeout);
-            log('bypass properties');
-            for (var key in ws) {
+            this.log('connect');
+            var oldWs = this.ws;
+            var wsUrl = (typeof this.url === 'function') ? this.url() : this.url;
+            this.ws = new this.config.constructor(wsUrl, this.protocols);
+            this.connectingTimeout = setTimeout(function () {
+                _this.log('timeout');
+                _this.ws.close();
+                _this.emitError('ETIMEDOUT', 'Connection timeout');
+            }, this.config.connectionTimeout);
+            this.log('bypass properties');
+            for (var key in this.ws) {
                 // @todo move to constant
                 if (['addEventListener', 'removeEventListener', 'close', 'send'].indexOf(key) < 0) {
-                    bypassProperty(ws, _this, key);
+                    bypassProperty(this.ws, this, key);
                 }
             }
-            ws.addEventListener('open', function () {
-                clearTimeout(connectingTimeout);
-                log('open');
-                reconnectDelay = initReconnectionDelay(config);
-                log('reconnectDelay:', reconnectDelay);
-                retriesCount = 0;
+            this.ws.addEventListener('open', function () {
+                clearTimeout(_this.connectingTimeout);
+                _this.log('open');
+                _this.reconnectDelay = initReconnectionDelay(_this.config);
+                _this.log('reconnectDelay:', _this.reconnectDelay);
+                _this.retriesCount = 0;
             });
-            ws.addEventListener('close', handleClose);
-            reassignEventListeners(ws, oldWs, listeners);
+            this.ws.addEventListener('close', this.handleClose);
+            reassignEventListeners(this.ws, oldWs, this.listeners);
             // because when closing with fastClose=true, it is saved and set to null to avoid double calls
-            ws.onclose = ws.onclose || savedOnClose;
-            savedOnClose = null;
+            this.ws.onclose = this.ws.onclose || this.savedOnClose;
+            this.savedOnClose = null;
         };
-        log('init');
-        connect();
-        this.close = function (code, reason, _a) {
+        ;
+        ReconnectingWebSocket.prototype.close = function (code, reason, _a) {
+            var _this = this;
             if (code === void 0) { code = 1000; }
             if (reason === void 0) { reason = ''; }
             var _b = _a === void 0 ? {} : _a, _c = _b.keepClosed, keepClosed = _c === void 0 ? false : _c, _d = _b.fastClose, fastClose = _d === void 0 ? true : _d, _e = _b.delay, delay = _e === void 0 ? 0 : _e;
-            log('close - params:', { reason: reason, keepClosed: keepClosed, fastClose: fastClose, delay: delay, retriesCount: retriesCount, maxRetries: config.maxRetries });
-            shouldRetry = !keepClosed && retriesCount <= config.maxRetries;
+            var retriesCount = this.retriesCount;
+            this.log('close - params:', { reason: reason, keepClosed: keepClosed, fastClose: fastClose, delay: delay, retriesCount: retriesCount, maxRetries: this.config.maxRetries });
+            this.shouldRetry = !keepClosed && this.retriesCount <= this.config.maxRetries;
             if (delay) {
-                reconnectDelay = delay;
+                this.reconnectDelay = delay;
             }
-            ws.close(code, reason);
+            this.ws.close(code, reason);
             if (fastClose) {
                 var fakeCloseEvent_1 = {
                     code: code,
@@ -168,50 +178,50 @@ define("index", ["require", "exports"], function (require, exports) {
                 // execute close listeners soon with a fake closeEvent
                 // and remove them from the WS instance so they
                 // don't get fired on the real close.
-                handleClose();
-                ws.removeEventListener('close', handleClose);
+                this.handleClose();
+                this.ws.removeEventListener('close', this.handleClose);
                 // run and remove level2
-                if (Array.isArray(listeners.close)) {
-                    listeners.close.forEach(function (_a) {
+                if (Array.isArray(this.listeners.close)) {
+                    this.listeners.close.forEach(function (_a) {
                         var listener = _a[0], options = _a[1];
                         listener(fakeCloseEvent_1);
-                        ws.removeEventListener('close', listener, options);
+                        _this.ws.removeEventListener('close', listener, options);
                     });
                 }
                 // run and remove level0
-                if (ws.onclose) {
-                    savedOnClose = ws.onclose;
-                    ws.onclose(fakeCloseEvent_1);
-                    ws.onclose = null;
+                if (this.ws.onclose) {
+                    this.savedOnClose = this.ws.onclose;
+                    this.ws.onclose(fakeCloseEvent_1);
+                    this.ws.onclose = null;
                 }
             }
         };
-        this.send = function (data) {
-            ws.send(data);
+        ReconnectingWebSocket.prototype.send = function (data) {
+            this.ws.send(data);
         };
-        this.addEventListener = function (type, listener, options) {
-            if (Array.isArray(listeners[type])) {
-                if (!listeners[type].some(function (_a) {
+        ReconnectingWebSocket.prototype.addEventListener = function (type, listener, options) {
+            if (Array.isArray(this.listeners[type])) {
+                if (!this.listeners[type].some(function (_a) {
                     var l = _a[0];
                     return l === listener;
                 })) {
-                    listeners[type].push([listener, options]);
+                    this.listeners[type].push([listener, options]);
                 }
             }
             else {
-                listeners[type] = [[listener, options]];
+                this.listeners[type] = [[listener, options]];
             }
-            ws.addEventListener(type, listener, options);
+            this.ws.addEventListener(type, listener, options);
         };
-        this.removeEventListener = function (type, listener, options) {
-            if (Array.isArray(listeners[type])) {
-                listeners[type] = listeners[type].filter(function (_a) {
+        ReconnectingWebSocket.prototype.removeEventListener = function (type, listener, options) {
+            if (Array.isArray(this.listeners[type])) {
+                this.listeners[type] = this.listeners[type].filter(function (_a) {
                     var l = _a[0];
                     return l !== listener;
                 });
             }
-            ws.removeEventListener(type, listener, options);
+            this.ws.removeEventListener(type, listener, options);
         };
-    };
-    return ReconnectingWebsocket;
+        return ReconnectingWebSocket;
+    }());
 });
